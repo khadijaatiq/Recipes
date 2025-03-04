@@ -1,0 +1,21 @@
+<?php include '../partials/header.php'; ?>
+<?php include '../partials/navbar.php'; ?>
+
+<h1>Add Recipe</h1>
+<form action="add_recipe_process.php" method="POST">
+    <input type="text" name="title" placeholder="Recipe Title" required>
+    <textarea name="description" placeholder="Description"></textarea>
+    <select name="category_id">
+        <?php
+        require '../config/db.php';
+        $sql = "SELECT * FROM Categories";
+        $result = $conn->query($sql);
+        while ($row = $result->fetch_assoc()) {
+            echo "<option value='" . $row['category_id'] . "'>" . $row['category_name'] . "</option>";
+        }
+        ?>
+    </select>
+    <button type="submit" name="submit">Add Recipe</button>
+</form>
+
+<?php include '../partials/footer.php'; ?>
