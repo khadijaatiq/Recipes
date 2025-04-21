@@ -16,12 +16,19 @@ if (isset($_POST['submit'])) {
         if (password_verify($password, $row['password'])) {
             $_SESSION['user_id'] = $row['user_id'];
             $_SESSION['username'] = $row['username'];
-            header("Location: ../index.php");
+            header("Location: ../dashboard.php");
+            exit;
         } else {
-            echo "Invalid password.";
+            // Redirect back with an error
+            header("Location: login.php?error=invalidpassword");
+            exit;
         }
     } else {
-        echo "User not found.";
+        header("Location: login.php?error=usernotfound");
+        exit;
     }
+} else {
+    // If the form wasn't submitted properly, redirect to login
+    header("Location: login.php");
+    exit;
 }
-?>
