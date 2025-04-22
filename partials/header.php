@@ -18,7 +18,7 @@
                 <ul class="nav-links">
                     <li><a href="/projectDB/index.php">Home</a></li>
                     <li><a href="/projectDB/recipes/add_recipe.php">Add Recipes</a></li>
-                    <li><a href="/projectDB/recipes/view_recipe.php">View Recipes</a></li>
+                    <li><a href="/projectDB/recipes/all_recipes.php">View Recipes</a></li>
                     <li><a href="/projectDB/pantry.php">Pantry</a></li>
                     <li><a href="/projectDB/recipes/bookmarks.php">Bookmarks</a></li>
                     <li><a href="/projectDB/profile.php">My Profile</a></li>
