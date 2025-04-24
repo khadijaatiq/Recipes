@@ -6,12 +6,11 @@ if (!isset($_SESSION['user_id'])) {
     exit();
 }
 
-require "../config/db.php";
+require "c:/xampp/htdocs/Recipes-main/config/db.php";
 
 $user_id = $_SESSION['user_id'];
-
 $sql = "
-    SELECT u.recipe_id, u.name, '' as image_url, 'user' as source
+    SELECT u.recipe_id, u.name, u.image_url, 'user' as source
     FROM bookmarks b 
     JOIN user_submitted_recipes u ON b.user_id = u.user_id
     WHERE b.user_id = ? AND b.recipe_source = 'user'
@@ -30,7 +29,7 @@ $stmt->execute();
 $result = $stmt->get_result();
 ?>
 <?php include '../partials/header.php'; ?>
-<div class="container">
+<main class="main-content">
     <h1>My Bookmarked Recipes</h1>
 
     <?php if (isset($_GET['success']) && $_GET['success'] === "recipe_bookmarked"): ?>
@@ -38,25 +37,27 @@ $result = $stmt->get_result();
     <?php endif; ?>
 
     <?php if ($result->num_rows > 0): ?>
-        <div class="recipes-grid">
-            <?php while ($row = $result->fetch_assoc()): ?>
-                <div class="recipe-card">
-                    <div class="recipe-image">
-                        <?php if ($row['source'] === 'system'): ?>
-                            <img src="<?= htmlspecialchars($row['image_url']); ?>" alt="<?= htmlspecialchars($row['name']); ?>">
-                        <?php else: ?>
-                            <img src="<?= !empty($row['image_url']) ? htmlspecialchars($row['image_url']) : '/images/default.jpg' ?>" alt="<?= htmlspecialchars($row['name']); ?>">
-                        <?php endif; ?>
+        <div class="recipes-grid" id="recipe-results">
+            <?php while($row = $result->fetch_assoc()): ?>
+                    <div class="recipe-card">
+                        <div class="recipe-image">
+                            <img src="<?= htmlspecialchars($row['image_url']) ?: 'default.jpg' ?>" alt="<?= htmlspecialchars($row['name']) ?>">
+                            <button class="bookmark-btn" onclick="toggleBookmark(this)">
+                                <i class="fas fa-bookmark"></i>
+                            </button>
+                        </div>
+                    <div class="recipe-content">
+                        <h3 class="recipe-title">
+                            <a href="recipe_detail.php?id=<?= $row['recipe_id'] ?>">
+                                <?= htmlspecialchars($row['name']) ?>
+                            </a>
+                        </h3>
                     </div>
-                    <h3><?= htmlspecialchars($row['name']); ?></h3>
-                    <a href="view_recipe.php?id=<?= $row['recipe_id']; ?>&source=<?= $row['source']; ?>">View Recipe</a>
-                </div>
-            <?php endwhile; ?>
-
-        </div>
-    <?php else: ?>
-        <p>No recipes bookmarked yet!</p>
+                    </div>
+        <?php endwhile; ?>
+    </div>
     <?php endif; ?>
-</div>
+</main>
+
 
 <?php include '../partials/footer.php'; ?>
