@@ -1,4 +1,6 @@
-<?php include '../partials/header.php'; ?>
+<?php 
+session_start();
+include '../partials/header.php'; ?>
 <?php
 require_once 'c:/xampp/htdocs/Recipes-main/config/db.php';
 
@@ -12,16 +14,67 @@ if ($conn->connect_errno) {
     die("Database connection failed: " . $conn->connect_error);
 }
 
+if (isset($_POST['toggle_bookmark'])) {
+    session_start();
+    if (!isset($_SESSION['user_id'])) {
+        die();
+    }
+
+    $userId = $_SESSION['user_id'];
+    $recipeId = (int)$_POST['recipe_id'];
+    $recipeSource = $_POST['recipe_source'] === 'system' ? 'system' : 'user';
+    $action = $_POST['action'];
+
+    if ($action === 'add') {
+        // Add to bookmarks
+        $stmt = $conn->prepare("INSERT INTO bookmarks (user_id, recipe_id, created_at) VALUES (?, ?, NOW())");
+        $stmt->bind_param("ii", $userId, $recipeId);
+        if ($stmt->execute()) {
+            // Log the bookmark action
+            $logStmt = $conn->prepare("INSERT INTO bookmark_logs (user_id, recipe_id) VALUES (?, ?)");
+            $logStmt->bind_param("ii", $userId, $recipeId);
+            $logStmt->execute();
+            $logStmt->close();
+        }
+    } else {
+        // Remove from bookmarks
+        $stmt = $conn->prepare("DELETE FROM bookmarks WHERE user_id = ? AND recipe_id = ?");
+        $stmt->bind_param("ii", $userId, $recipeId);
+        $stmt->execute();
+    }
+    $stmt->close();
+    
+    // Redirect back to prevent form resubmission
+    header("Location: ".$_SERVER['PHP_SELF']);
+    exit;
+}
+
+// Get user's bookmarks if logged in
+$bookmarkedRecipes = [];
+if (isset($_SESSION['user_id'])) {
+    $userId = $_SESSION['user_id'];
+    $bookmarkStmt = $conn->prepare("SELECT recipe_id FROM bookmarks WHERE user_id = ?");
+    $bookmarkStmt->bind_param("i", $userId);
+    $bookmarkStmt->execute();
+    $bookmarkResult = $bookmarkStmt->get_result();
+    
+    while ($row = $bookmarkResult->fetch_assoc()) {
+        $bookmarkedRecipes[$row['recipe_id']] = true;
+    }
+    $bookmarkStmt->close();
+}
+
 // Base query for system recipes
 $query = "
     SELECT 
-        r.recipe_id, 
-        r.name, 
-        r.image_url, 
+        r.RECIPE_ID as recipe_id, 
+        r.NAME as name, 
+        r.IMAGE_URL as image_url, 
         IFNULL(AVG(rt.rating), 0) AS rating,
-        'system' as source
+        r.source
     FROM recipes r
-    LEFT JOIN ratings rt ON r.recipe_id = rt.recipe_id
+    LEFT JOIN ratings rt ON r.RECIPE_ID = rt.recipe_id
+    WHERE r.source = 'system'
 ";
 
 // Initialize variables for filters
@@ -34,7 +87,7 @@ $userConditions = [];
 
 // SEARCH FILTER
 if (!empty($_GET['search'])) {
-    $conditions[] = " (r.name LIKE ? OR r.description LIKE ?)";
+    $conditions[] = " (r.NAME LIKE ? OR r.DESCRIPTION LIKE ?)";
     $searchTerm = "%" . $_GET['search'] . "%";
     $params[] = $searchTerm;
     $params[] = $searchTerm;
@@ -45,10 +98,10 @@ if (!empty($_GET['search'])) {
 if (!empty($_GET['meal'])) {
     $mealTypes = (array)$_GET['meal'];
     $placeholders = implode(',', array_fill(0, count($mealTypes), '?'));
-    $conditions[] = " r.recipe_id IN (
+    $conditions[] = " r.RECIPE_ID IN (
         SELECT rm.recipe_id FROM recipe_meal_types rm 
         JOIN meal_types m ON rm.meal_type_id = m.id 
-        WHERE rm.recipe_source = 'system' AND m.name IN ($placeholders))
+        WHERE m.name IN ($placeholders))
     ";
     $params = array_merge($params, $mealTypes);
     $types .= str_repeat('s', count($mealTypes));
@@ -58,9 +111,10 @@ if (!empty($_GET['meal'])) {
 if (!empty($_GET['cuisine'])) {
     $cuisines = (array)$_GET['cuisine'];
     $placeholders = implode(',', array_fill(0, count($cuisines), '?'));
-    $conditions[] = "  r.recipe_id IN (SELECT rc.recipe_id FROM recipe_cuisines rc 
+    $conditions[] = " r.RECIPE_ID IN (
+        SELECT rc.recipe_id FROM recipe_cuisines rc 
         JOIN cuisines c ON rc.cuisine_id = c.cuisine_id
-        WHERE rc.recipe_source = 'system' AND c.name IN ($placeholders))";
+        WHERE c.name IN ($placeholders))";
     $params = array_merge($params, $cuisines);
     $types .= str_repeat('s', count($cuisines));
 }
@@ -69,46 +123,52 @@ if (!empty($_GET['cuisine'])) {
 if (!empty($_GET['diet'])) {
     $diets = (array)$_GET['diet'];
     $placeholders = implode(',', array_fill(0, count($diets), '?'));
-    $conditions[] = " r.recipe_id IN (
+    $conditions[] = " r.RECIPE_ID IN (
         SELECT rd.recipe_id FROM recipe_dietary_restrictions rd
         JOIN dietary_restrictions d ON rd.restriction_id = d.id
-        WHERE rd.recipe_source = 'system' AND d.name IN ($placeholders))";
+        WHERE d.name IN ($placeholders))";
     $params = array_merge($params, $diets);
     $types .= str_repeat('s', count($diets));
 }
 
 // MAX COOK TIME FILTER
 if (!empty($_GET['max_time'])) {
-    $conditions[] = " r.cooking_time <= ?";
+    $conditions[] = " r.COOKING_TIME <= ?";
     $params[] = (int)$_GET['max_time'];
     $types .= 'i';
 }
 
-// Add WHERE clause if there are conditions
-if (!empty($conditions)) {
-    $query .= " WHERE " . implode(" AND ", $conditions);
+if (!empty($_GET['min_rating'])) {
+    $conditions[] = "rating >= ?";
+    $params[] = (float)$_GET['min_rating'];
+    $types .= 'd';
 }
 
-$query .= " GROUP BY r.recipe_id, r.name, r.image_url";
+// Add WHERE clause if there are conditions
+if (!empty($conditions)) {
+    $query .= " AND " . implode(" AND ", $conditions);
+}
+
+$query .= " GROUP BY r.RECIPE_ID, r.NAME, r.IMAGE_URL, r.source";
 
 // UNION with user recipes
 $query .= "
     UNION
     
     SELECT 
-        usr.recipe_id, 
-        usr.name, 
-        usr.image_url, 
+        r.RECIPE_ID as recipe_id, 
+        r.NAME as name, 
+        r.IMAGE_URL as image_url, 
         IFNULL(AVG(rt.rating), 0) AS rating,
-        'user' as source
-    FROM user_submitted_recipes usr
-    LEFT JOIN ratings rt ON usr.recipe_id = rt.recipe_id
-    WHERE usr.status='public'";
+        r.source
+    FROM recipes r
+    LEFT JOIN ratings rt ON r.RECIPE_ID = rt.recipe_id
+    WHERE r.source = 'user' AND r.status='public'";
 
 // USER RECIPE FILTERS
 // Search
 if (!empty($_GET['search'])) {
-    $userConditions[] = " (usr.name LIKE ? OR usr.description LIKE ?)";
+    $userConditions[] = " (r.NAME LIKE ? OR r.DESCRIPTION LIKE ?)";
     $searchTerm = "%" . $_GET['search'] . "%";
     $userParams[] = $searchTerm;
     $userParams[] = $searchTerm;
@@ -119,10 +179,10 @@ if (!empty($_GET['search'])) {
 if (!empty($_GET['meal'])) {
     $mealTypes = (array)$_GET['meal'];
     $placeholders = implode(',', array_fill(0, count($mealTypes), '?'));
-    $userConditions[] = " usr.recipe_id IN (
+    $userConditions[] = " r.RECIPE_ID IN (
         SELECT rm.recipe_id FROM recipe_meal_types rm 
         JOIN meal_types m ON rm.meal_type_id = m.id 
-        WHERE rm.recipe_source = 'user' AND m.name IN ($placeholders))
+        WHERE m.name IN ($placeholders))
     ";
     $userParams = array_merge($userParams, $mealTypes);
     $userTypes .= str_repeat('s', count($mealTypes));
@@ -132,10 +192,10 @@ if (!empty($_GET['meal'])) {
 if (!empty($_GET['cuisine'])) {
     $cuisines = (array)$_GET['cuisine'];
     $placeholders = implode(',', array_fill(0, count($cuisines), '?'));
-    $userConditions[] = " usr.recipe_id IN (
+    $userConditions[] = " r.RECIPE_ID IN (
         SELECT rc.recipe_id FROM recipe_cuisines rc 
         JOIN cuisines c ON rc.cuisine_id = c.cuisine_id
-        WHERE rc.recipe_source = 'user' AND c.name IN ($placeholders))";
+        WHERE c.name IN ($placeholders))";
     $userParams = array_merge($userParams, $cuisines);
     $userTypes .= str_repeat('s', count($cuisines));
 }
@@ -144,19 +204,25 @@ if (!empty($_GET['cuisine'])) {
 if (!empty($_GET['diet'])) {
     $diets = (array)$_GET['diet'];
     $placeholders = implode(',', array_fill(0, count($diets), '?'));
-    $userConditions[] = " usr.recipe_id IN (
+    $userConditions[] = " r.RECIPE_ID IN (
         SELECT rd.recipe_id FROM recipe_dietary_restrictions rd
         JOIN dietary_restrictions d ON rd.restriction_id = d.id
-        WHERE rd.recipe_source = 'user' AND d.name IN ($placeholders))";
+        WHERE d.name IN ($placeholders))";
     $userParams = array_merge($userParams, $diets);
     $userTypes .= str_repeat('s', count($diets));
 }
 
 // Max Cook Time
 if (!empty($_GET['max_time'])) {
-    $userConditions[] = " usr.cooking_time <= ?";
+    $userConditions[] = " r.COOKING_TIME <= ?";
     $userParams[] = (int)$_GET['max_time'];
     $userTypes .= 'i';
+}
+
+if (!empty($_GET['min_rating'])) {
+    $userConditions[] = " rating >= ?";
+    $userParams[] = (float)$_GET['min_rating'];
+    $userTypes .= 'd';
 }
 
 // Add conditions to user part of query
@@ -164,7 +230,7 @@ if (!empty($userConditions)) {
     $query .= " AND " . implode(" AND ", $userConditions);
 }
 
-$query .= " GROUP BY usr.recipe_id, usr.name, usr.image_url";
+$query .= " GROUP BY r.RECIPE_ID, r.NAME, r.IMAGE_URL, r.source";
 // Prepare and execute the query
 $stmt = $conn->prepare($query);
 
@@ -212,7 +278,7 @@ function toggleBookmark(el) {
                 <form id="filter-form" method="GET" action="">
                     <div class="search-bar">
                         <i class="fas fa-search search-icon"></i>
-                        <input type="text" name="search" id="recipe-search" placeholder="Search recipes or ingredients..." 
+                        <input type="text" name="search" id="recipe-search" placeholder="Search recipes" 
                                value="<?= isset($_GET['search']) ? htmlspecialchars($_GET['search']) : '' ?>">
                         <button id="filters-button" class="filters-button" type="button">
                             <i class="fas fa-sliders-h"></i>
@@ -230,7 +296,7 @@ function toggleBookmark(el) {
                             <h4><i class="fas fa-utensils"></i> Meal Type</h4>
                             <div class="filter-checkboxes">
                                 <?php 
-                                $meal_types = ['Breakfast', 'Lunch', 'Dinner', 'Snack', 'Dessert', 'Brunch'];
+                                $meal_types = ['Beverage','Sauce','Side Dish','Breakfast', 'Lunch', 'Dinner', 'Snack', 'Dessert', 'Brunch'];
                                 foreach($meal_types as $type): 
                                     $checked = isset($_GET['meal']) && in_array($type, (array)$_GET['meal']) ? 'checked' : '';
                                 ?>
@@ -245,20 +311,18 @@ function toggleBookmark(el) {
                         <!-- CUISINE FILTER (as checkboxes) -->
                         <div class="filters-section">
                             <h4><i class="fas fa-globe"></i> Cuisine</h4>
-                            <div class="filter-checkboxes">
-                                <?php 
-                                $cuisines = ['Italian', 'Chinese', 'Indian', 'Mexican', 'Thai', 'Mediterranean', 'Japanese', 'American', 'French', 'Other'];
-                                foreach($cuisines as $cuisine): 
-                                    $checked = isset($_GET['cuisine']) && in_array($cuisine, (array)$_GET['cuisine']) ? 'checked' : '';
-                                ?>
-                                    <label class="filter-checkbox">
+                                <div class="filter-checkboxes">
+                                     <?php 
+                                        $cuisines = ['Italian', 'Chinese', 'Indian', 'Mexican', 'Thai', 'Mediterranean', 'Japanese', 'American', 'French', 'Other'];
+                                         foreach($cuisines as $cuisine): 
+                                            $checked = isset($_GET['cuisine']) && $_GET['cuisine'] == $cuisine ? 'checked' : '';?>
+                                            <label class="filter-checkbox">
                                         <input type="checkbox" name="cuisine[]" value="<?= $cuisine ?>" <?= $checked ?>>
                                         <?= $cuisine ?>
                                     </label>
                                 <?php endforeach; ?>
                             </div>
                         </div>
-                        
                         <!-- DIETARY RESTRICTIONS FILTER -->
                         <div class="filters-section">
                             <h4><i class="fas fa-leaf"></i> Dietary Restrictions</h4>
@@ -275,6 +339,7 @@ function toggleBookmark(el) {
                                 <?php endforeach; ?>
                             </div>
                         </div>
+                        
                         <div class="filters-section">
                             <h4><i class="fas fa-clock"></i> Max Cook Time</h4>
                             <div class="range-slider">
@@ -287,7 +352,18 @@ function toggleBookmark(el) {
                                 </div>
                             </div>
                         </div>
-                        
+                        <div class="filters-section">
+                            <h4><i class="fas fa-star"></i> Minimum Rating</h4>
+                            <div class="range-slider">
+                                <input type="range" name="min_rating" id="rating-slider" min="0" max="5" step="0.5" 
+                                    value="<?= isset($_GET['min_rating']) ? $_GET['min_rating'] : '0' ?>" class="slider">
+                                <div class="slider-values">
+                                    <span>0</span>
+                                    <span id="rating-value"><?= isset($_GET['min_rating']) ? $_GET['min_rating'] : '3' ?></span>
+                                    <span>5</span>
+                                </div>
+                            </div>
+                        </div>
                         <div class="filters-actions">
                             <button type="submit" class="button button-primary">Apply Filters</button>
                         </div>
@@ -311,14 +387,14 @@ function toggleBookmark(el) {
                         <?php endforeach; ?>
                     <?php endif; ?>
                     
-                    <?php if(isset($_GET['cuisine'])): ?>
-                        <?php foreach((array)$_GET['cuisine'] as $cuisine): ?>
-                            <div class="active-filter">
-                                <?= htmlspecialchars($cuisine) ?>
-                                <span class="remove-filter" data-name="cuisine[]" data-value="<?= htmlspecialchars($cuisine) ?>">×</span>
-                            </div>
-                        <?php endforeach; ?>
-                    <?php endif; ?>
+                    <?php if(isset($_GET['cuisine']) && !empty($_GET['cuisine'])): ?>
+    <?php foreach((array)$_GET['cuisine'] as $cuisine): ?>
+        <div class="active-filter">
+            <?= htmlspecialchars($cuisine) ?>
+            <span class="remove-filter" data-name="cuisine[]" data-value="<?= htmlspecialchars($cuisine) ?>">×</span>
+        </div>
+    <?php endforeach; ?>
+<?php endif; ?>
                     
                     <?php if(isset($_GET['diet'])): ?>
                         <?php foreach((array)$_GET['diet'] as $diet): ?>
@@ -335,17 +411,40 @@ function toggleBookmark(el) {
                             <span class="remove-filter" data-name="max_time" data-value="60">×</span>
                         </div>
                     <?php endif; ?>
+                    <?php if(isset($_GET['min_rating']) && $_GET['min_rating'] > 0): ?>
+                        <div class="active-filter">
+                            Min <?= (float)$_GET['min_rating'] ?> stars
+                        <span class="remove-filter" data-name="min_rating" data-value="0">×</span>
+                        </div>
+                    <?php endif; ?>
                 </div>
             </div>
 
             <div class="recipes-grid" id="recipe-results">
                 <?php while($row = $result->fetch_assoc()): ?>
                     <div class="recipe-card">
-                        <div class="recipe-image">
-                            <img src="<?= htmlspecialchars($row['image_url']) ?: 'default.jpg' ?>" alt="<?= htmlspecialchars($row['name']) ?>">
-                            <button class="bookmark-btn" onclick="toggleBookmark(this)">
-                                <i class="fas fa-bookmark"></i>
-                            </button>
+                    <?php
+            // Improved image path handling with fallback
+            $imagePath = (!empty($row['image_url']) && $row['image_url'] != 'default.jpg' )
+                ? htmlspecialchars($row['image_url']) 
+                : '/Recipes-main/images/default.jpg';
+            ?>
+            <div class="recipe-image">
+                <img src="<?= $imagePath ?>" alt="<?= htmlspecialchars($row['name']) ?>" onerror="this.src='/Recipes-main/images/default.png'">
+                            <?php if(isset($_SESSION['user_id'])): ?>
+                    <form method="POST" action="<?= htmlspecialchars($_SERVER['PHP_SELF']) ?>">
+                        <input type="hidden" name="recipe_id" value="<?= $row['recipe_id'] ?>">
+                        <input type="hidden" name="recipe_source" value="<?= $row['source'] ?>">
+                        <input type="hidden" name="action" value="<?= isset($bookmarkedRecipes[$row['recipe_id']]) ? 'remove' : 'add' ?>">
+                        <button type="submit" name="toggle_bookmark" class="bookmark-btn <?= isset($bookmarkedRecipes[$row['recipe_id']]) ? 'active' : '' ?>">
+                            <i class="<?= isset($bookmarkedRecipes[$row['recipe_id']]) ? 'fas' : 'far' ?> fa-bookmark"></i>
+                        </button>
+                    </form>
+                <?php else: ?>
+                    <button class="bookmark-btn" onclick="alert('Please login to bookmark recipes')">
+                        <i class="far fa-bookmark"></i>
+                    </button>
+                <?php endif; ?>
                         </div>
                         <div class="recipe-content">
                             <h3 class="recipe-title">
@@ -368,6 +467,43 @@ function toggleBookmark(el) {
 </main>
 
 <script>
+    
+    // Toggle filter panel
+    document.addEventListener('DOMContentLoaded', function() {
+        const bookmarkForms = document.querySelectorAll('.bookmark-form');
+        
+        bookmarkForms.forEach(form => {
+            form.addEventListener('submit', function(e) {
+                e.preventDefault();
+                
+                const button = this.querySelector('.bookmark-btn');
+                const icon = button.querySelector('i');
+                const actionInput = this.querySelector('input[name="action"]');
+                
+                // Toggle UI immediately
+                button.classList.toggle('active');
+                icon.classList.toggle('fas');
+                icon.classList.toggle('far');
+                
+                // Toggle the action value
+                actionInput.value = actionInput.value === 'add' ? 'remove' : 'add';
+                
+                // Submit the form in the background
+                fetch(this.action, {
+                    method: 'POST',
+                    body: new FormData(this)
+                }).catch(error => {
+                    console.error('Error:', error);
+                    // Revert UI if error occurs
+                    button.classList.toggle('active');
+                    icon.classList.toggle('fas');
+                    icon.classList.toggle('far');
+                    actionInput.value = actionInput.value === 'add' ? 'remove' : 'add';
+                });
+            });
+        });
+    });
+
     // Toggle filter panel
     const panel = document.getElementById('filters-panel');
     const filterBtn = document.getElementById('filters-button');
@@ -381,6 +517,58 @@ function toggleBookmark(el) {
     timeSlider.addEventListener('input', () => {
         timeValue.textContent = timeSlider.value + 'min';
     });
+    
+    const ratingSlider = document.getElementById('rating-slider');
+    const ratingValue = document.getElementById('rating-value');
+    ratingSlider.addEventListener('input', () => {
+        ratingValue.textContent = ratingSlider.value;
+    });
+
+    // Submit only active filters
+    document.getElementById('filter-form').addEventListener('submit', function(e) {
+        // Get all form elements
+        const formData = new FormData(this);
+        const params = new URLSearchParams();
+        
+        // Only include non-default/active values
+        if (formData.get('search')) {
+            params.append('search', formData.get('search'));
+        }
+        
+        // Meal types
+        const meals = formData.getAll('meal[]');
+        if (meals.length > 0) {
+            meals.forEach(meal => params.append('meal[]', meal));
+        }
+        
+        // Cuisines
+        const cuisines = formData.getAll('cuisine[]');
+        if (cuisines.length > 0) {
+            cuisines.forEach(cuisine => params.append('cuisine[]', cuisine));
+        }
+        
+        // Diets
+        const diets = formData.getAll('diet[]');
+        if (diets.length > 0) {
+            diets.forEach(diet => params.append('diet[]', diet));
+        }
+        
+        // Max time (only if not default 60)
+        if (formData.get('max_time') && formData.get('max_time') != '60') {
+            params.append('max_time', formData.get('max_time'));
+        }
+        
+        // Min rating (only if not default 0)
+        if (formData.get('min_rating') && formData.get('min_rating') != '0') {
+            params.append('min_rating', formData.get('min_rating'));
+        }
+        
+        // Prevent default form submission
+        e.preventDefault();
+        
+        // Navigate to the clean URL
+        window.location.href = window.location.pathname + (params.toString() ? '?' + params.toString() : '');
+    });
 
     // Remove filter
     document.addEventListener('click', (e) => {
@@ -388,28 +576,23 @@ function toggleBookmark(el) {
             const name = e.target.getAttribute('data-name');
             const value = e.target.getAttribute('data-value');
             
-            // Submit the form without the removed filter
-            const form = document.getElementById('filter-form');
+            // Get current URL params
+            const urlParams = new URLSearchParams(window.location.search);
+            
+            // Handle array parameters
             if (name.includes('[]')) {
-            // Remove this specific value from the array
-            const inputs = form.querySelectorAll(`input[name="${name}"]`);
-            inputs.forEach(input => {
-                if (input.value === value) {
-                    input.remove();
-                }
-            });
-        } else {
-            // For non-array parameters (search, max_time)
-            const input = form.querySelector(`input[name="${name}"]`);
-            if (input) {
-                if (name === 'max_time') {
-                    input.value = '60'; // Reset to default
-                } else {
-                    input.remove();
-                }
+                const currentValues = urlParams.getAll(name);
+                const newValues = currentValues.filter(v => v !== value);
+                urlParams.delete(name);
+                newValues.forEach(v => urlParams.append(name, v));
+            } 
+            // Handle single parameters
+            else {
+                urlParams.delete(name);
             }
-        }
-            form.submit();
+            
+            // Navigate to new URL
+            window.location.href = window.location.pathname + (urlParams.toString() ? '?' + urlParams.toString() : '');
         }
     });
 
