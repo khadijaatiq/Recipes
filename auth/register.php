@@ -1,8 +1,8 @@
-<?php include '../partials/header.php'; ?>
+<link rel="stylesheet" href="../partials/styles.css">
 <div class="auth-container">
     <div class="auth-card">
         <div class="auth-header">
-            <a href="/ProjectDB/index.php" class="logo">CookCraft</a>
+            <a href="/Recipes-main/index.php" class="logo">CookCraft</a>
             <h1>Create Account</h1>
             <p>Join our cooking community today</p>
         </div>
@@ -44,7 +44,7 @@
             </div>
             <button type="submit" class="button button-primary w-full">Sign Up</button>
             <p class="auth-redirect">
-                Already have an account? <a href="/ProjectDB/auth/login.php">Log in</a>
+                Already have an account? <a href="/Recipes-main/auth/login.php">Log in</a>
             </p>
         </form>
     </div>
@@ -71,4 +71,3 @@
     }
 </style>
 
-<?php include '../partials/footer.php'; ?>
