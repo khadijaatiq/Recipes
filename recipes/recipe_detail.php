@@ -130,7 +130,7 @@ $cuisines_stmt->close();
 $meal_types_stmt = $conn->prepare("
     SELECT mt.name 
     FROM recipe_meal_types rmt 
-    JOIN meal_types mt ON rmt.meal_type_id = mt.id 
+    JOIN meal_types mt ON rmt.meal_type_id = mt.meal_id 
     WHERE rmt.recipe_id = ?
 ");
 $meal_types_stmt->bind_param("i", $recipe_id);
@@ -146,7 +146,7 @@ $meal_types_stmt->close();
 $dietary_stmt = $conn->prepare("
     SELECT dr.name 
     FROM recipe_dietary_restrictions rdr
-    JOIN dietary_restrictions dr ON rdr.restriction_id = dr.id 
+    JOIN dietary_restrictions dr ON rdr.restriction_id = dr.dietRes_id 
     WHERE rdr.recipe_id = ?
 ");
 $dietary_stmt->bind_param("i", $recipe_id);
