@@ -1,4 +1,4 @@
-<?php 
+can you just integrate this logic here because whats happening is its spinning and it says bookmark could not be added but its adding in the bookmarks page which means it is being added correctly and the bookmark icon isn't being filled so <?php 
 session_start();
 include '../partials/header.php'; ?>
 <?php
@@ -311,18 +311,19 @@ function toggleBookmark(el) {
                         <!-- CUISINE FILTER (as checkboxes) -->
                         <div class="filters-section">
                             <h4><i class="fas fa-globe"></i> Cuisine</h4>
-                                <div class="filter-checkboxes">
-                                     <?php 
-                                        $cuisines = ['Italian', 'Chinese', 'Indian', 'Mexican', 'Thai', 'Mediterranean', 'Japanese', 'American', 'French', 'Other'];
-                                         foreach($cuisines as $cuisine): 
-                                            $checked = isset($_GET['cuisine']) && $_GET['cuisine'] == $cuisine ? 'checked' : '';?>
-                                            <label class="filter-checkbox">
-                                        <input type="checkbox" name="cuisine[]" value="<?= $cuisine ?>" <?= $checked ?>>
-                                        <?= $cuisine ?>
-                                    </label>
-                                <?php endforeach; ?>
-                            </div>
-                        </div>
+    <div class="filter-checkboxes">
+        <?php 
+        $cuisines = ['Italian', 'Chinese', 'Indian', 'Mexican', 'Thai', 'Mediterranean', 'Japanese', 'American', 'French', 'Other'];
+        foreach($cuisines as $cuisine): 
+            $checked = isset($_GET['cuisine']) && $_GET['cuisine'] == $cuisine ? 'checked' : '';
+        ?>
+            <label class="filter-checkbox">
+                <input type="radio" name="cuisine" value="<?= $cuisine ?>" <?= $checked ?>>
+                <?= $cuisine ?>
+            </label>
+        <?php endforeach; ?>
+    </div>
+</div>
                         <!-- DIETARY RESTRICTIONS FILTER -->
                         <div class="filters-section">
                             <h4><i class="fas fa-leaf"></i> Dietary Restrictions</h4>
@@ -388,12 +389,10 @@ function toggleBookmark(el) {
                     <?php endif; ?>
                     
                     <?php if(isset($_GET['cuisine']) && !empty($_GET['cuisine'])): ?>
-    <?php foreach((array)$_GET['cuisine'] as $cuisine): ?>
-        <div class="active-filter">
-            <?= htmlspecialchars($cuisine) ?>
-            <span class="remove-filter" data-name="cuisine[]" data-value="<?= htmlspecialchars($cuisine) ?>">×</span>
-        </div>
-    <?php endforeach; ?>
+    <div class="active-filter">
+        <?= htmlspecialchars($_GET['cuisine']) ?>
+        <span class="remove-filter" data-name="cuisine" data-value="">×</span>
+    </div>
 <?php endif; ?>
                     
                     <?php if(isset($_GET['diet'])): ?>
@@ -469,6 +468,23 @@ function toggleBookmark(el) {
 <script>
     
     // Toggle filter panel
+    const panel = document.getElementById('filters-panel');
+    const filterBtn = document.getElementById('filters-button');
+    filterBtn.addEventListener('click', () => {
+        panel.classList.toggle('active');
+    });
+
+    // Update time slider display
+    const timeSlider = document.getElementById('time-slider');
+    const timeValue = document.getElementById('time-value');
+    timeSlider.addEventListener('input', () => {
+        timeValue.textContent = timeSlider.value + 'min';
+    });
+    const ratingSlider = document.getElementById('rating-slider');
+    const ratingValue = document.getElementById('rating-value');
+    ratingSlider.addEventListener('input', () => {
+    ratingValue.textContent = ratingSlider.value;
+    });
     document.addEventListener('DOMContentLoaded', function() {
         const bookmarkForms = document.querySelectorAll('.bookmark-form');
         
@@ -504,95 +520,37 @@ function toggleBookmark(el) {
         });
     });
 
-    // Toggle filter panel
-    const panel = document.getElementById('filters-panel');
-    const filterBtn = document.getElementById('filters-button');
-    filterBtn.addEventListener('click', () => {
-        panel.classList.toggle('active');
-    });
-
-    // Update time slider display
-    const timeSlider = document.getElementById('time-slider');
-    const timeValue = document.getElementById('time-value');
-    timeSlider.addEventListener('input', () => {
-        timeValue.textContent = timeSlider.value + 'min';
-    });
-    
-    const ratingSlider = document.getElementById('rating-slider');
-    const ratingValue = document.getElementById('rating-value');
-    ratingSlider.addEventListener('input', () => {
-        ratingValue.textContent = ratingSlider.value;
-    });
-
-    // Submit only active filters
-    document.getElementById('filter-form').addEventListener('submit', function(e) {
-        // Get all form elements
-        const formData = new FormData(this);
-        const params = new URLSearchParams();
-        
-        // Only include non-default/active values
-        if (formData.get('search')) {
-            params.append('search', formData.get('search'));
-        }
-        
-        // Meal types
-        const meals = formData.getAll('meal[]');
-        if (meals.length > 0) {
-            meals.forEach(meal => params.append('meal[]', meal));
-        }
-        
-        // Cuisines
-        const cuisines = formData.getAll('cuisine[]');
-        if (cuisines.length > 0) {
-            cuisines.forEach(cuisine => params.append('cuisine[]', cuisine));
-        }
-        
-        // Diets
-        const diets = formData.getAll('diet[]');
-        if (diets.length > 0) {
-            diets.forEach(diet => params.append('diet[]', diet));
-        }
-        
-        // Max time (only if not default 60)
-        if (formData.get('max_time') && formData.get('max_time') != '60') {
-            params.append('max_time', formData.get('max_time'));
-        }
-        
-        // Min rating (only if not default 0)
-        if (formData.get('min_rating') && formData.get('min_rating') != '0') {
-            params.append('min_rating', formData.get('min_rating'));
-        }
-        
-        // Prevent default form submission
-        e.preventDefault();
-        
-        // Navigate to the clean URL
-        window.location.href = window.location.pathname + (params.toString() ? '?' + params.toString() : '');
-    });
-
     // Remove filter
     document.addEventListener('click', (e) => {
         if (e.target.classList.contains('remove-filter')) {
             const name = e.target.getAttribute('data-name');
             const value = e.target.getAttribute('data-value');
-            
-            // Get current URL params
-            const urlParams = new URLSearchParams(window.location.search);
-            
-            // Handle array parameters
+            if (name === 'cuisine') {
+            const radio = form.querySelector(`input[type="radio"][name="${name}"][value="${value}"]`);
+            if (radio) radio.checked = false;
+            // Submit the form without the removed filter
+            const form = document.getElementById('filter-form');
             if (name.includes('[]')) {
-                const currentValues = urlParams.getAll(name);
-                const newValues = currentValues.filter(v => v !== value);
-                urlParams.delete(name);
-                newValues.forEach(v => urlParams.append(name, v));
-            } 
-            // Handle single parameters
-            else {
-                urlParams.delete(name);
+            // Remove this specific value from the array
+            const inputs = form.querySelectorAll(`input[name="${name}"]`);
             }
-            
-            // Navigate to new URL
-            window.location.href = window.location.pathname + (urlParams.toString() ? '?' + urlParams.toString() : '');
+            inputs.forEach(input => {
+                if (input.value === value) {
+                    input.remove();
+                }
+            });
+        } else {
+            // For non-array parameters (search, max_time)
+            const input = form.querySelector(`input[name="${name}"]`);
+            if (input) {
+                if (name === 'max_time') {
+                    input.value = '60'; // Reset to default
+                } else {
+                    input.remove();
+                }
+            }
+        }
+            form.submit();
         }
     });
 
