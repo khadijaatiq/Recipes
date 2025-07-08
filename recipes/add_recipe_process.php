@@ -5,6 +5,7 @@ if (!isset($_SESSION['user_id'])) {
     header("Location: ../auth/login.php");
     exit();
 }
+
 $conn = require __DIR__ . "/../config/db.php";
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -17,28 +18,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $conn->begin_transaction();
     try {
-        // --- Call the stored procedure to add recipe ---
-        $stmt = $conn->prepare("CALL AddUserRecipe(?, ?, ?, ?, ?)");
-        $stmt->bind_param("issis", $user_id, $name, $description, $cooking_time, $image_url);
-        
+        // --- Insert into unified recipes table ---
+        $recipe_sql = "INSERT INTO recipes (user_id, name, description, cooking_time, image_url, status, source) 
+                      VALUES (?, ?, ?, ?, ?, ?, 'user')";
+        $stmt = $conn->prepare($recipe_sql);
+        $stmt->bind_param("ississ", $user_id, $name, $description, $cooking_time, $image_url, $status);
         if ($stmt->execute()) {
-            // Get the new recipe ID from the procedure result
-            $result = $stmt->get_result();
-            $row = $result->fetch_assoc();
-            $recipe_id = $row['new_recipe_id'];
-            
-            // Free the result set
-            $stmt->free_result();
-            $stmt->close();
-            
-            // --- Update the status (since procedure sets it to 'private') ---
-            if ($status !== 'private') {
-                $updateStmt = $conn->prepare("UPDATE recipes SET status = ? WHERE recipe_id = ?");
-                $updateStmt->bind_param("si", $status, $recipe_id);
-                $updateStmt->execute();
-                $updateStmt->close();
-            }
-
+            $recipe_id = $stmt->insert_id;
             // --- Insert Ingredients ---
             if (!empty($_POST['ingredient_name']) && !empty($_POST['ingredient_quantity'])) {
                 $names = $_POST['ingredient_name'];
@@ -77,7 +63,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!empty($_POST['steps'])) {
                 foreach ($_POST['steps'] as $step_number => $instruction) {
                     $stmtStep = $conn->prepare("INSERT INTO instructions (recipe_id, step_number, description) 
-                                              VALUES (?, ?, ?)");
+                                                VALUES (?, ?, ?)");
                     $stmtStep->bind_param("iis", $recipe_id, $step_number, $instruction);
                     $stmtStep->execute();
                     $stmtStep->close();
@@ -86,7 +72,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             // --- Link Recipe and Cuisine ---
             if (!empty($_POST['cuisine'])) {
-                $cuisine = $_POST['cuisine'];
+                $cuisine = $_POST['cuisine']; // Get the single selected value
                 
                 $stmtCuisine = $conn->prepare("SELECT cuisine_id FROM cuisines WHERE name = ?");
                 $stmtCuisine->bind_param("s", $cuisine);
@@ -107,7 +93,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // --- Insert Meal Types ---
             if (!empty($_POST['meal_types'])) {
                 foreach ($_POST['meal_types'] as $meal) {
-                    $stmtMeal = $conn->prepare("SELECT id FROM meal_types WHERE name = ?");
+                    $stmtMeal = $conn->prepare("SELECT meal_id FROM meal_types WHERE name = ?");
                     $stmtMeal->bind_param("s", $meal);
                     $stmtMeal->execute();
                     $mealRes = $stmtMeal->get_result()->fetch_assoc();
@@ -126,13 +112,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // --- Insert Dietary Restrictions ---
             if (!empty($_POST['dietary_restrictions'])) {
                 foreach ($_POST['dietary_restrictions'] as $diet) {
-                    $stmtDiet = $conn->prepare("SELECT id FROM dietary_restrictions WHERE name = ?");
+                    $stmtDiet = $conn->prepare("SELECT dietRes_id FROM dietary_restrictions WHERE name = ?");
                     $stmtDiet->bind_param("s", $diet);
                     $stmtDiet->execute();
                     $dietRes = $stmtDiet->get_result()->fetch_assoc();
 
                     if ($dietRes) {
-                        $restriction_id = $dietRes['id'];
+                        $restriction_id = $dietRes['dietRes_id'];
                         $linkDiet = $conn->prepare("INSERT INTO recipe_dietary_restrictions (recipe_id, restriction_id) VALUES (?, ?)");
                         $linkDiet->bind_param("ii", $recipe_id, $restriction_id);
                         $linkDiet->execute();
@@ -152,12 +138,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             header("Location: ../recipes/bookmarks.php?success=recipe_added");
             exit();
         } else {
-            throw new Exception("Failed to call AddUserRecipe procedure.");
+            throw new Exception("Failed to insert recipe.");
         }
     } catch (Exception $e) {
         $conn->rollback();
-        echo "Error: " . $e->getMessage() . "<br>MySQL error: " . $conn->error;
+        echo("Error: " . $e->getMessage() . "<br>MySQL error: " . $conn->error);
+       // header("Location: " . getUrlPath('recipes/add_recipe.php?error=recipe_insert_failed'));
         exit();
+    } finally {
+        if (isset($stmt)) $stmt->close();
     }
 } else {
     header("Location: add_recipe.php");
